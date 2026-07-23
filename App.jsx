@@ -4,7 +4,6 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, Cell, Legend,
 } from "recharts";
-import { store, isPersistent, storageMode } from "./storage";
 
 /* ================================================================== *
  *  PALETTE
@@ -40,6 +39,8 @@ const CHANNELS = [
   { id: "walkin", name: "Walk-in", platform: "Organic", owner: "none", group: "indep" },
   { id: "call", name: "Direct Call", platform: "Organic", owner: "none", group: "indep" },
   { id: "dm", name: "Direct Message", platform: "Organic", owner: "none", group: "indep" },
+  { id: "sms", name: "SMS", platform: "Organic", owner: "none", group: "indep" },
+  { id: "other", name: "Other", platform: "Organic", owner: "none", group: "indep" },
 ];
 
 const COUNSELLORS = [
@@ -61,6 +62,8 @@ const FIELDS = {
   clicks:      { label: "Clicks", short: "Clicks", kind: "int" },
   convos:      { label: "Messaging Conversations Started", short: "Convos", kind: "int" },
   queries:     { label: "Queries", short: "Queries", kind: "int" },
+  cpm:         { label: "CPM", short: "CPM", kind: "money" },
+  payment:     { label: "Payment", short: "Payment", kind: "money" },
   leads:       { label: "Leads", short: "Leads", kind: "int" },
   booked:      { label: "Booked", short: "Booked", kind: "int" },
   show:        { label: "Show", short: "Show", kind: "int" },
@@ -71,7 +74,6 @@ const FIELDS = {
 /* Derived — never typed, always computed */
 const DERIVED = {
   cpc:       { label: "CPC (link)", kind: "money", fn: (r) => div(r.spend, r.linkClicks) },
-  cpm:       { label: "CPM", kind: "money", fn: (r) => div(r.spend, r.impressions) * 1000 },
   cpl:       { label: "CPL", kind: "money", fn: (r) => div(r.spend, r.leads) },
   cpb:       { label: "Cost / Booked", kind: "money", fn: (r) => div(r.spend, r.booked) },
   ctr:       { label: "CTR", kind: "pct", fn: (r) => div(r.clicks, r.impressions) },
@@ -87,30 +89,35 @@ const FUNNEL = ["leads", "booked", "show", "paid", "coes"];
 const GROUPS = [
   {
     id: "paid", title: "Paid Media", sub: "Meta ads", ownerId: "pm", layout: "panel",
-    inputs: ["spend", "impressions", "linkClicks", "convos", "leads", "booked", "show", "paid", "coes"],
-    derived: ["cpc", "cpm", "cpl", "cpb", "bookRate", "showRate"],
+    inputs: ["spend", "linkClicks", "cpm", "convos", "leads", "booked", "show", "paid", "coes"],
+    derived: ["cpc", "cpl", "cpb", "bookRate", "showRate"],
   },
   {
     id: "social", title: "Social", sub: "organic social channels", ownerId: "smm", layout: "table",
-    inputs: ["queries", "leads", "booked", "show", "paid", "coes", "spend"],
+    inputs: ["queries", "leads", "booked", "show", "paid", "coes", "payment"],
     derived: ["bookRate", "showRate"],
   },
   {
     id: "search", title: "Organic Search", sub: "website", ownerId: "seo", layout: "table",
-    inputs: ["impressions", "clicks", "leads", "booked", "show", "paid", "coes", "spend"],
+    inputs: ["impressions", "clicks", "leads", "booked", "show", "paid", "coes", "payment"],
     derived: ["ctr", "bookRate", "showRate"],
   },
   {
     id: "indep", title: "Independent organic", sub: "no team lead assigned", ownerId: "none", layout: "table",
-    inputs: ["leads", "booked", "show", "paid", "coes"],
+    inputs: ["leads", "booked", "show", "paid", "coes", "payment"],
     derived: ["bookRate", "showRate"],
   },
 ];
 const groupOf = (id) => GROUPS.find((g) => g.id === id);
 
 const TAGS = ["", "Intake peak", "Intake trough", "Public holiday", "Campaign launch", "Tracking gap", "Other one-off"];
-const KEY = "edu-marketing-ledger-v2";
-const OLD_KEY = "weekly-marketing-ledger-v1";
+const KEY = "edu-marketing-ledger-v3";
+
+/* 16 weeks backfilled from the WBR workbook (5 Apr – 19 Jul 2026).
+   Only figures that exist per-channel in the source are here. Where the
+   source tracked something at platform level only, the cell is left blank
+   and the week's note records the number. */
+const SEED = {"2026-04-05":{"ch":{"meta":{"spend":2526.02,"linkClicks":1443,"convos":189,"leads":232,"booked":53,"show":22,"cpm":14.64},"search":{"leads":10,"payment":248},"referral":{"leads":12,"payment":375},"walkin":{"leads":8},"direct":{"leads":8},"other":{"leads":8,"payment":1448}},"co":{"gurbir":{"booked":11},"nasir":{"booked":2,"coes":3},"turab":{"booked":1},"kajal":{"booked":18},"navneet":{"booked":30},"saurab":{"booked":15},"wajahad":{"booked":39}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 4; organic booked 30 / showed 21."},"2026-04-12":{"ch":{"meta":{"spend":908.28,"linkClicks":571,"convos":75,"leads":96,"booked":32,"show":18,"cpm":13.07},"search":{"leads":11},"referral":{"leads":12,"payment":698},"walkin":{"leads":7},"direct":{"leads":11},"other":{"leads":11,"payment":1150}},"co":{"gurbir":{"booked":7},"nasir":{"booked":1,"coes":29},"turab":{"booked":2,"coes":5},"kajal":{"booked":8},"navneet":{"booked":14},"saurab":{"booked":12},"wajahad":{"booked":15}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 6; organic booked 27 / showed 19."},"2026-04-19":{"ch":{"meta":{"spend":172,"linkClicks":117,"leads":46,"booked":46,"show":25,"cpm":18.33},"search":{"leads":3,"payment":250},"referral":{"leads":14,"payment":775},"walkin":{"leads":8},"direct":{"leads":9,"payment":100},"other":{"leads":13,"payment":7648}},"co":{"gurbir":{"booked":17,"coes":1},"nasir":{"booked":6,"coes":1},"turab":{"booked":3},"kajal":{"booked":8},"navneet":{"booked":6},"saurab":{"booked":14},"wajahad":{"booked":18}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 7; organic booked 38 / showed 30."},"2026-04-26":{"ch":{"meta":{"spend":296,"linkClicks":158,"convos":1,"leads":43,"booked":34,"show":16,"cpm":17.42},"search":{"leads":8,"payment":100},"referral":{"leads":22,"payment":5280},"walkin":{"leads":8},"direct":{"leads":7},"other":{"leads":10,"payment":3230}},"co":{"gurbir":{"booked":7,"coes":2},"nasir":{"booked":8,"coes":5},"turab":{"coes":1},"kajal":{"booked":6,"coes":14},"navneet":{"booked":14,"coes":2},"saurab":{"booked":10,"coes":12},"wajahad":{"booked":16,"coes":13}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 7; organic booked 30 / showed 23."},"2026-05-03":{"ch":{"meta":{"spend":719,"linkClicks":392,"convos":10,"leads":55,"booked":39,"show":25,"cpm":16.76},"search":{"leads":3},"referral":{"leads":17,"payment":980},"walkin":{"leads":9},"direct":{"leads":6},"other":{"leads":7,"payment":11293}},"co":{"gurbir":{"booked":8,"coes":1},"nasir":{"booked":15,"coes":10},"kajal":{"booked":11,"coes":2},"navneet":{"booked":10},"saurab":{"booked":9},"wajahad":{"booked":20,"coes":4}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 1; organic booked 30 / showed 26."},"2026-05-10":{"ch":{"meta":{"spend":777,"linkClicks":334,"convos":14,"leads":60,"booked":44,"show":23,"cpm":17.96},"search":{"leads":2,"payment":1767},"referral":{"leads":18,"payment":2400},"walkin":{"leads":17},"direct":{"leads":7,"payment":100},"other":{"leads":11,"payment":32743}},"co":{"gurbir":{"booked":5,"coes":1},"nasir":{"booked":19,"coes":4},"turab":{"booked":6,"coes":1},"kajal":{"booked":9,"coes":1},"navneet":{"booked":26},"saurab":{"booked":9},"wajahad":{"booked":18,"coes":2}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 4 (payment $150); organic booked 42 / showed 39."},"2026-05-17":{"ch":{"meta":{"spend":2416,"linkClicks":960,"convos":100,"leads":120,"booked":36,"show":19,"cpm":19.66},"search":{"leads":11,"payment":100},"referral":{"leads":20,"payment":5160},"walkin":{"leads":8},"direct":{"leads":8},"other":{"leads":11,"payment":1948}},"co":{"gurbir":{"booked":4},"nasir":{"booked":28,"coes":1},"turab":{"booked":8,"coes":2},"kajal":{"booked":7,"coes":4},"navneet":{"booked":15,"coes":2},"saurab":{"booked":8,"coes":2},"wajahad":{"booked":12,"coes":2}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 4; organic booked 39 / showed 34."},"2026-05-24":{"ch":{"meta":{"spend":1949,"linkClicks":823,"convos":85,"leads":117,"booked":42,"show":15,"cpm":23.49},"search":{"leads":6},"referral":{"leads":26,"payment":1985},"walkin":{"leads":8},"direct":{"leads":8},"other":{"leads":7,"payment":6874}},"co":{"gurbir":{"booked":7},"nasir":{"booked":19,"coes":6},"turab":{"booked":7,"coes":1},"kajal":{"booked":7,"coes":2},"navneet":{"booked":16,"coes":1},"saurab":{"booked":5,"coes":7},"wajahad":{"booked":8}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 4; organic booked 35 / showed 29."},"2026-05-31":{"ch":{"meta":{"spend":1160,"linkClicks":539,"convos":22,"leads":35,"booked":11,"show":6,"cpm":23.5},"search":{"leads":7,"payment":100},"referral":{"leads":17,"payment":3528},"walkin":{"leads":4},"direct":{"leads":9},"other":{"leads":14,"payment":31900}},"co":{"gurbir":{"booked":3},"nasir":{"booked":19},"turab":{"booked":6},"kajal":{"booked":5,"coes":2},"navneet":{"booked":3},"saurab":{"booked":8,"coes":1},"wajahad":{"booked":8}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 5; organic booked 43 / showed 26."},"2026-06-07":{"ch":{"meta":{"spend":1709,"linkClicks":1077,"convos":15,"leads":51,"booked":33,"show":15,"cpm":23.01},"search":{"leads":8,"payment":6264},"referral":{"leads":23,"payment":1900},"walkin":{"leads":4},"direct":{"leads":10},"other":{"leads":9,"payment":11884}},"co":{"gurbir":{"booked":4,"coes":6},"nasir":{"booked":28,"coes":8},"turab":{"booked":8,"coes":2},"kajal":{"booked":2,"coes":2},"navneet":{"booked":10,"coes":1},"saurab":{"booked":8,"coes":3},"wajahad":{"booked":3,"coes":1}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 6; organic booked 43 / showed 38."},"2026-06-14":{"ch":{"meta":{"spend":1313,"linkClicks":606,"convos":27,"leads":34,"booked":18,"show":7,"cpm":19.67},"search":{"leads":8,"payment":275},"referral":{"leads":6,"payment":475},"walkin":{"leads":7},"direct":{"leads":8},"other":{"leads":12,"payment":7795}},"co":{"gurbir":{"booked":1},"nasir":{"booked":18,"coes":3},"turab":{"booked":6,"coes":1},"kajal":{"booked":10,"coes":6},"navneet":{"booked":3},"saurab":{"booked":5},"wajahad":{"booked":10,"coes":4}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 6; organic booked 30 / showed 24."},"2026-06-21":{"ch":{"meta":{"spend":2063.76,"linkClicks":1173,"convos":18,"leads":35,"booked":18,"show":10,"cpm":16.01},"search":{"leads":3,"payment":1128},"referral":{"leads":21,"payment":2498},"walkin":{"leads":5},"direct":{"leads":12,"payment":100},"other":{"leads":7,"payment":11312}},"co":{"gurbir":{"coes":2},"nasir":{"booked":22,"coes":4},"turab":{"booked":4,"coes":3},"kajal":{"booked":6,"coes":5},"navneet":{"booked":5},"saurab":{"booked":3,"coes":2},"wajahad":{"booked":5,"coes":7}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 12; organic booked 29 / showed 23."},"2026-06-28":{"ch":{"meta":{"spend":2963.56,"linkClicks":1179,"convos":13,"leads":17,"booked":7,"show":4,"cpm":20.42},"search":{"leads":5,"payment":7403},"referral":{"leads":14,"payment":12533},"walkin":{"leads":5},"direct":{"leads":4},"other":{"leads":9,"payment":18971}},"co":{"gurbir":{"booked":4},"nasir":{"booked":17,"coes":3},"turab":{"booked":2,"coes":1},"kajal":{"booked":1,"coes":3},"navneet":{"booked":2},"saurab":{"booked":5,"coes":2},"wajahad":{"booked":9,"coes":7}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 8; organic booked 30 / showed 22."},"2026-07-05":{"ch":{"meta":{"spend":2975,"linkClicks":1119,"convos":37,"leads":54,"booked":21,"show":7},"search":{"leads":11},"referral":{"leads":19},"walkin":{"leads":2},"direct":{"leads":10},"other":{"leads":6}},"co":{"gurbir":{"booked":2},"nasir":{"booked":19},"turab":{"booked":1},"kajal":{"booked":3,"coes":1},"navneet":{"booked":9},"saurab":{"booked":6,"coes":2},"wajahad":{"booked":8,"coes":2}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 7; organic booked 28 / showed 22."},"2026-07-12":{"ch":{"meta":{"spend":2815.4,"linkClicks":1102,"convos":20,"leads":51,"booked":6,"show":3},"search":{"leads":13},"referral":{"leads":18},"walkin":{"leads":2},"direct":{"leads":8},"other":{"leads":4}},"co":{"gurbir":{"booked":4},"nasir":{"booked":11},"kajal":{"booked":3,"coes":5},"navneet":{"booked":2},"saurab":{"booked":6,"coes":2},"wajahad":{"booked":3,"coes":4}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 3; organic booked 29 / showed 21."},"2026-07-19":{"ch":{"meta":{"spend":1425,"linkClicks":479,"convos":10,"leads":16,"booked":1},"search":{"leads":11},"referral":{"leads":16},"walkin":{"leads":3},"direct":{"leads":13},"other":{"leads":4}},"co":{"gurbir":{"booked":1},"nasir":{"booked":14},"turab":{"booked":1},"kajal":{"booked":1,"coes":3},"saurab":{"booked":2,"coes":1},"wajahad":{"booked":4,"coes":4}},"note":"Backfilled from WBR. Not split by channel in source \u2014 social leads 4; organic booked 22 / showed 15."}};
 
 /* ================================================================== *
  *  HELPERS
@@ -151,7 +158,7 @@ function emptyWeek() {
     groupOf(c.group).inputs.forEach((f) => (channels[c.id][f] = ""));
   });
   const counsellors = {};
-  COUNSELLORS.forEach((p) => (counsellors[p.id] = { leads: "", booked: "", show: "" }));
+  COUNSELLORS.forEach((p) => (counsellors[p.id] = { booked: "", show: "", coes: "" }));
   return { channels, counsellors, tag: "", note: "" };
 }
 
@@ -167,23 +174,12 @@ function rollup(week, chans) {
   });
   return t;
 }
-function rollupStaff(week, people) {
-  const t = { leads: 0, booked: 0, show: 0 };
-  if (!week) return t;
-  people.forEach((p) => {
-    const r = week.counsellors?.[p.id];
-    if (!r) return;
-    t.leads += num(r.leads); t.booked += num(r.booked); t.show += num(r.show);
-  });
-  return t;
-}
 const rates = (r) => ({
   ...r,
   cpl: div(r.spend, r.leads), cpb: div(r.spend, r.booked),
   bookRate: div(r.booked, r.leads), showRate: div(r.show, r.booked),
   paidRate: div(r.paid, r.show), coeRate: div(r.coes, r.paid),
   ctr: div(r.clicks, r.impressions), cpc: div(r.spend, r.linkClicks),
-  cpm: div(r.spend, r.impressions) * 1000,
 });
 
 /* --------- seasonality --------- */
@@ -214,25 +210,72 @@ const stdev = (a) => {
 /* ================================================================== *
  *  STORAGE (degrades to session memory instead of breaking)
  * ================================================================== */
-/* Storage lives in ./storage.js — that is the only file to change
-   if you move from browser-local to shared server data. */
+const mem = {};
+let persistent = true;
 
-/* Bring forward anything logged under the previous schema */
-function migrate(old) {
+/* Works in three places without changing a line:
+   1. Claude artifact  -> window.storage
+   2. Vercel / any web -> localStorage
+   3. neither          -> memory for this session only            */
+const store = {
+  async get(k) {
+    try {
+      if (typeof window !== "undefined" && window.storage?.get) {
+        const r = await window.storage.get(k);
+        persistent = true;
+        return r;
+      }
+    } catch (e) {
+      if (!String(e).match(/not.?found|no.?such|missing/i)) persistent = false;
+      return null;
+    }
+    try {
+      const v = window.localStorage.getItem(k);
+      persistent = true;
+      return v == null ? null : { key: k, value: v };
+    } catch { /* blocked */ }
+    persistent = false;
+    return mem[k] ? { key: k, value: mem[k] } : null;
+  },
+  async set(k, v) {
+    try {
+      if (typeof window !== "undefined" && window.storage?.set) {
+        const r = await window.storage.set(k, v);
+        persistent = true;
+        return r;
+      }
+    } catch { /* fall through */ }
+    try {
+      window.localStorage.setItem(k, v);
+      persistent = true;
+      return { key: k, value: v };
+    } catch { /* quota or private mode */ }
+    persistent = false;
+    mem[k] = v;
+    return { key: k, value: v };
+  },
+};
+
+/* Turn the compact SEED into full week records. Unknown ids are ignored,
+   so editing CHANNELS or COUNSELLORS can never break the backfill. */
+function expandSeed() {
   const out = {};
-  Object.entries(old.weeks || {}).forEach(([k, w]) => {
-    const nw = emptyWeek();
-    nw.tag = w.tag || ""; nw.note = w.note || "";
-    CHANNELS.forEach((c) => {
-      const src = w.values?.[c.id] || {};
-      const dst = nw.channels[c.id];
-      if ("leads" in dst) dst.leads = src.leads ?? "";
-      if ("booked" in dst) dst.booked = src.qualified ?? "";
-      if ("show" in dst) dst.show = src.customers ?? "";
-      if ("paid" in dst) dst.paid = src.revenue ?? "";
-      if ("spend" in dst) dst.spend = src.cost ?? "";
+  Object.entries(SEED).forEach(([wk, d]) => {
+    const w = emptyWeek();
+    Object.entries(d.ch || {}).forEach(([cid, vals]) => {
+      if (!w.channels[cid]) return;
+      Object.entries(vals).forEach(([f, val]) => {
+        if (f in w.channels[cid]) w.channels[cid][f] = String(val);
+      });
     });
-    out[k] = nw;
+    Object.entries(d.co || {}).forEach(([pid, vals]) => {
+      if (!w.counsellors[pid]) return;
+      Object.entries(vals).forEach(([f, val]) => {
+        if (f in w.counsellors[pid]) w.counsellors[pid][f] = String(val);
+      });
+    });
+    w.note = d.note || "";
+    out[wk] = w;
   });
   return out;
 }
@@ -291,7 +334,7 @@ const shellStyle = { minHeight: "100vh", background: C.paper, color: C.ink, font
 function Fonts() {
   return (
     <style>{`
-      /* Fonts are loaded in index.html so they never block first paint. */
+      @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
       * { box-sizing: border-box; }
       input, select, button { font-family: inherit; }
       input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid ${C.navy}; outline-offset: 1px; }
@@ -322,12 +365,7 @@ function Ledger() {
     (async () => {
       let data = null;
       try { const r = await store.get(KEY); data = r ? JSON.parse(r.value) : null; } catch { /* empty */ }
-      if (!data) {
-        try {
-          const o = await store.get(OLD_KEY);
-          if (o) { const w = migrate(JSON.parse(o.value)); if (Object.keys(w).length) data = { weeks: w }; }
-        } catch { /* empty */ }
-      }
+      if (!data?.weeks || !Object.keys(data.weeks).length) data = { weeks: expandSeed() };
       if (data?.weeks && Object.keys(data.weeks).length) {
         const keys = Object.keys(data.weeks).sort();
         setWeeks(data.weeks); setOrder(keys);
@@ -379,6 +417,17 @@ function Ledger() {
     const n = { ...weeks, [active]: { ...emptyWeek(), tag: weeks[active].tag, note: weeks[active].note } };
     setWeeks(n); persist(n, active);
   };
+  const restoreSeed = () => {
+    const seeded = expandSeed();
+    const n = { ...weeks };
+    let added = 0;
+    Object.entries(seeded).forEach(([k, w]) => { if (!n[k]) { n[k] = w; added++; } });
+    if (!added) return;
+    const o = Object.keys(n).sort();
+    setWeeks(n); setOrder(o); persist(n, active);
+  };
+  const missingSeed = Object.keys(SEED).filter((k) => !weeks[k]).length;
+
   const delWeek = () => {
     if (order.length <= 1) return;
     const n = { ...weeks }; delete n[active];
@@ -420,10 +469,7 @@ function Ledger() {
               Weekly Marketing Ledger
             </h1>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-              Leads → Booked → Show → Paid Bookings → COEs · figures in AUD
-              {storageMode === "local" && (
-                <span style={{ color: C.ochre }}> · saved in this browser only</span>
-              )}
+              Leads → Booked → Show → COEs · figures in AUD
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -453,9 +499,10 @@ function Ledger() {
         {view === "enter" && <EnterView wk={active} week={weeks[active]} cur={cur}
           onCh={setChannel} onStaff={setStaff} onMeta={setMeta}
           onCopy={copyPrev} onClear={clearWeek} onDelete={delWeek}
+          onRestore={restoreSeed} missingSeed={missingSeed}
           canCopy={i > 0} canDelete={order.length > 1} />}
         {view === "review" && <ReviewView wk={active} prevKey={prevKey} week={weeks[active]} prev={prevKey ? weeks[prevKey] : null} cur={cur} prv={prv} />}
-        {view === "team" && <TeamView wk={active} week={weeks[active]} prev={prevKey ? weeks[prevKey] : null} order={order} weeks={weeks} onStaff={setStaff} />}
+        {view === "team" && <TeamView week={weeks[active]} order={order} weeks={weeks} />}
         {view === "trends" && <TrendsView order={order} weeks={weeks} />}
         {view === "season" && <SeasonView series={series} weeks={weeks} />}
       </main>
@@ -465,7 +512,7 @@ function Ledger() {
 
 function SaveChip({ state }) {
   if (state === "idle") return null;
-  const m = { saving: ["Saving…", C.faint], saved: [isPersistent() ? "Saved" : "Not saved", isPersistent() ? C.pine : C.ochre], error: ["Not saved", C.down] };
+  const m = { saving: ["Saving…", C.faint], saved: [persistent ? "Saved" : "Session only", persistent ? C.pine : C.ochre], error: ["Not saved", C.down] };
   const [t, col] = m[state] || m.saving;
   return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: col, letterSpacing: ".06em" }}>{t}</span>;
 }
@@ -499,7 +546,7 @@ function WeekSpine({ series, active, onPick }) {
 /* ================================================================== *
  *  ENTER
  * ================================================================== */
-function EnterView({ wk, week, cur, onCh, onStaff, onMeta, onCopy, onClear, onDelete, canCopy, canDelete }) {
+function EnterView({ wk, week, cur, onCh, onStaff, onMeta, onCopy, onClear, onDelete, onRestore, missingSeed, canCopy, canDelete }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
@@ -511,7 +558,8 @@ function EnterView({ wk, week, cur, onCh, onStaff, onMeta, onCopy, onClear, onDe
           </select>
           <span style={{ fontSize: 11, color: C.faint }}>Tagged weeks stay in charts, out of the seasonality baseline.</span>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {missingSeed > 0 && <Btn small onClick={onRestore}>Restore {missingSeed} backfilled {missingSeed === 1 ? "week" : "weeks"}</Btn>}
           {canCopy && <Btn small onClick={onCopy}>Copy last week</Btn>}
           <Btn small onClick={onClear}>Clear</Btn>
           {canDelete && <Btn small danger onClick={onDelete}>Delete week</Btn>}
@@ -545,8 +593,8 @@ function EnterView({ wk, week, cur, onCh, onStaff, onMeta, onCopy, onClear, onDe
           style={{ border: `1px solid ${C.rule}`, borderRadius: 2, padding: "9px 11px", fontSize: 13, background: C.card, width: "100%" }} />
       </div>
       <p style={{ fontSize: 11.5, color: C.faint, margin: 0, lineHeight: 1.6 }}>
-        Booking rate is Booked ÷ Leads. Show rate is Show ÷ Booked. Paid rate is Paid Bookings ÷ Show. COE rate is COEs ÷ Paid Bookings.
-        Everything saves as you type.
+        Booking rate is Booked ÷ Leads. Show rate is Show ÷ Booked. Payment is money received; only Meta Ads
+        carries Spend. Everything saves as you type.
       </p>
     </div>
   );
@@ -630,52 +678,52 @@ function GroupTable({ g, chans, week, onCh }) {
 }
 
 function StaffTable({ week, onStaff }) {
-  const tot = { leads: 0, booked: 0, show: 0 };
-  COUNSELLORS.forEach((p) => { tot.leads += num(week.counsellors?.[p.id]?.leads); tot.booked += num(week.counsellors?.[p.id]?.booked); tot.show += num(week.counsellors?.[p.id]?.show); });
+  const cols = [
+    { id: "booked", label: "Bookings" },
+    { id: "show", label: "Show" },
+    { id: "coes", label: "COEs" },
+  ];
+  const tot = { booked: 0, show: 0, coes: 0 };
+  COUNSELLORS.forEach((p) => cols.forEach((c) => (tot[c.id] += num(week.counsellors?.[p.id]?.[c.id]))));
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap" }}>
         <span style={{ width: 3, height: 14, background: C.plum, borderRadius: 2, alignSelf: "center" }} />
         <h3 style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontSize: 14.5, fontWeight: 600, margin: 0 }}>Counsellors</h3>
-        <span style={{ fontSize: 11.5, color: C.faint }}>bookings and attendance by person</span>
+        <span style={{ fontSize: 11.5, color: C.faint }}>bookings, attendance and COEs by person</span>
       </div>
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 520 }}>
             <thead>
               <tr style={{ background: C.wash }}>
                 <th style={{ ...th, textAlign: "left", paddingLeft: 16, minWidth: 130 }}>Counsellor</th>
-                <th style={{ ...th, minWidth: 90 }}>Leads assigned</th>
-                <th style={{ ...th, minWidth: 84 }}>Bookings</th>
-                <th style={{ ...th, minWidth: 84 }}>Show</th>
-                <th style={{ ...th, minWidth: 90, color: C.faint }}>Booking rate</th>
-                <th style={{ ...th, minWidth: 84, color: C.faint }}>Show rate</th>
+                {cols.map((c) => <th key={c.id} style={{ ...th, minWidth: 88 }}>{c.label}</th>)}
+                <th style={{ ...th, minWidth: 88, color: C.faint }}>Show rate</th>
               </tr>
             </thead>
             <tbody>
               {COUNSELLORS.map((p) => {
                 const r = week.counsellors?.[p.id] || {};
-                const l = num(r.leads), b = num(r.booked), s = num(r.show);
+                const b = num(r.booked), sh = num(r.show);
                 return (
                   <tr key={p.id} className="rowHover">
                     <td style={{ ...td, textAlign: "left", paddingLeft: 16 }}>
                       <div style={{ fontSize: 13 }}>{p.name}</div>
                       <div style={{ fontSize: 9.5, color: TEAM_COLOR[p.team], fontFamily: "'IBM Plex Mono',monospace", letterSpacing: ".08em", textTransform: "uppercase" }}>{p.team}</div>
                     </td>
-                    {["leads", "booked", "show"].map((f) => (
-                      <td key={f} style={{ ...td, padding: 0 }}>
-                        <input className="cellInput" inputMode="numeric" placeholder="0" value={r[f] ?? ""} onChange={(e) => onStaff(p.id, f, e.target.value)} />
+                    {cols.map((c) => (
+                      <td key={c.id} style={{ ...td, padding: 0 }}>
+                        <input className="cellInput" inputMode="numeric" placeholder="0" value={r[c.id] ?? ""} onChange={(e) => onStaff(p.id, c.id, e.target.value)} />
                       </td>
                     ))}
-                    <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: C.muted }}>{pctf(div(b, l))}</td>
-                    <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: C.muted }}>{pctf(div(s, b))}</td>
+                    <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: C.muted }}>{pctf(div(sh, b))}</td>
                   </tr>
                 );
               })}
               <tr style={{ background: C.wash, borderTop: `2px solid ${C.ink}` }}>
                 <td style={{ ...td, textAlign: "left", paddingLeft: 16, fontWeight: 600 }}>Total</td>
-                {["leads", "booked", "show"].map((f) => <td key={f} style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 600, fontSize: 12.5 }}>{nf(tot[f])}</td>)}
-                <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 600, fontSize: 12.5 }}>{pctf(div(tot.booked, tot.leads))}</td>
+                {cols.map((c) => <td key={c.id} style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 600, fontSize: 12.5 }}>{nf(tot[c.id])}</td>)}
                 <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontWeight: 600, fontSize: 12.5 }}>{pctf(div(tot.show, tot.booked))}</td>
               </tr>
             </tbody>
@@ -683,8 +731,9 @@ function StaffTable({ week, onStaff }) {
         </div>
       </Card>
       <p style={{ fontSize: 11.5, color: C.faint, margin: 0, lineHeight: 1.6 }}>
-        Leads assigned is here because booking rate needs a denominator. Leave it blank if you don't split leads by
-        counsellor — bookings, show and show rate still work.
+        Bookings and COEs for 5 Apr – 19 Jul are backfilled from your WBR sheet. Show is blank for those
+        weeks because the source never recorded attendance per counsellor \u2014 fill it in going forward and
+        show rate starts working.
       </p>
     </div>
   );
@@ -706,6 +755,7 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
   const cards = [
     ["Leads", cur.leads, prv.leads, "int", false],
     ["Amount Spend", cur.spend, prv.spend, "money", true],
+    ["Payment", cur.payment, prv.payment, "money", false],
     ["Booked", cur.booked, prv.booked, "int", false],
     ["Show", cur.show, prv.show, "int", false],
     ["Paid Bookings", cur.paid, prv.paid, "int", false],
@@ -740,10 +790,12 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
     flags.push(cur.showRate > 0 && cur.showRate < 0.6
       ? [`Show rate is ${pctf(cur.showRate, 0)}. More than a third of booked appointments did not attend — that is a confirmation and reminder problem, not a lead problem.`, "warn"]
       : [`Show rate is ${pctf(cur.showRate, 0)} on ${nf(cur.booked)} bookings.`, "ok"]);
-    const organicSpend = byPlatform.find((b) => b.platform === "Organic").cur.spend;
-    flags.push(organicSpend === 0
-      ? ["Organic is carrying zero spend, so its CPL reads as nil and Meta will always look expensive by comparison. Allocate salary, tools and content cost.", "warn"]
-      : [`Organic carries $${nf(organicSpend)} of allocated spend, so the Paid vs Organic comparison holds up.`, "ok"]);
+    const org = byPlatform.find((b) => b.platform === "Organic").cur;
+    if (org.leads > 0)
+      flags.push([`Organic produced ${nf(org.leads)} leads at no media spend, against ${nf(cur.leads - org.leads)} from Meta. Cost per lead only exists on the paid side, so judge the two against each other on booking and show rate, not on CPL.`, "ok"]);
+    const untracked = FUNNEL.filter((f) => cur[f] === 0);
+    if (untracked.length && cur.leads > 0)
+      flags.push([`Nothing entered yet for ${untracked.map((f) => FIELDS[f].label.toLowerCase()).join(", ")}. The funnel stops early until those are filled in.`, "info"]);
     if (prevKey) {
       const d = growth(cur.cpl, prv.cpl);
       if (Number.isFinite(d))
@@ -767,18 +819,21 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ width: 104, fontSize: 12, color: C.muted, flexShrink: 0 }}>{s.label}</span>
                 <div style={{ flex: 1, minWidth: 60, background: C.wash, borderRadius: 2, height: 26, position: "relative", overflow: "hidden" }}>
-                  <div style={{ width: `${w}%`, height: "100%", background: [C.ink, C.navy, C.pine, "#4C7C5E", C.ochre][i], opacity: 0.86, borderRadius: 2 }} />
-                  <span style={{ position: "absolute", left: 9, top: 5, fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, color: w > 22 ? "#fff" : C.ink, fontWeight: 500 }}>{nf(v)}</span>
+                  {v > 0 && <div style={{ width: `${w}%`, height: "100%", background: [C.ink, C.navy, C.pine, "#4C7C5E", C.ochre][i], opacity: 0.86, borderRadius: 2 }} />}
+                  <span style={{ position: "absolute", left: 9, top: 5, fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, color: v === 0 ? C.faint : w > 22 ? "#fff" : C.ink, fontWeight: 500 }}>
+                    {v > 0 ? nf(v) : "not tracked"}
+                  </span>
                 </div>
                 <span style={{ width: 74, textAlign: "right", fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: C.muted, flexShrink: 0 }}>
-                  {conv != null ? pctf(conv, 0) : ""}
+                  {conv != null && v > 0 ? pctf(conv, 0) : ""}
                 </span>
               </div>
             );
           })}
         </div>
         <p style={{ fontSize: 11.5, color: C.faint, margin: "12px 0 0" }}>
-          Right-hand figure is conversion from the stage above. Overall lead → COE is {pctf(div(cur.coes, cur.leads), 1)}.
+          Right-hand figure is conversion from the stage above. A stage marked "not tracked" has no source in
+          your sheet yet — fill it in on the Enter tab and the funnel completes itself.
         </p>
       </Card>
 
@@ -802,7 +857,7 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
           <thead>
             <tr style={{ background: C.wash }}>
-              {["Owner", "Ch.", "Leads", "Spend", "Booked", "Show", "Paid bk.", "COEs", "CPL", "Book %", "Show %", "Leads Δ"].map((h, i) => (
+              {["Owner", "Ch.", "Leads", "Spend", "Payment", "Booked", "Show", "COEs", "CPL", "Book %", "Show %", "Leads Δ"].map((h, i) => (
                 <th key={h} style={{ ...th, textAlign: i === 0 ? "left" : "right", paddingLeft: i === 0 ? 16 : 8 }}>{h}</th>
               ))}
             </tr>
@@ -819,9 +874,9 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
                 <Mono dim>{b.n}</Mono>
                 <Mono>{nf(b.cur.leads)}</Mono>
                 <Mono>{money(b.cur.spend)}</Mono>
+                <Mono>{money(b.cur.payment)}</Mono>
                 <Mono>{nf(b.cur.booked)}</Mono>
                 <Mono>{nf(b.cur.show)}</Mono>
-                <Mono>{nf(b.cur.paid)}</Mono>
                 <Mono>{nf(b.cur.coes)}</Mono>
                 <Mono>{money(b.cur.cpl, 2)}</Mono>
                 <Mono dim>{pctf(b.cur.bookRate, 0)}</Mono>
@@ -838,7 +893,7 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
           <thead>
             <tr style={{ background: C.wash }}>
-              {["Platform", "Leads", "Share", "Spend", "CPL", "Booked", "Show", "COEs"].map((h, i) => (
+              {["Platform", "Leads", "Share", "Spend", "Payment", "CPL", "Booked", "Show", "COEs"].map((h, i) => (
                 <th key={h} style={{ ...th, textAlign: i === 0 ? "left" : "right", paddingLeft: i === 0 ? 16 : 8 }}>{h}</th>
               ))}
             </tr>
@@ -855,6 +910,7 @@ function ReviewView({ wk, prevKey, week, prev, cur, prv }) {
                 <Mono>{nf(p.cur.leads)}</Mono>
                 <Mono dim>{pctf(div(p.cur.leads, cur.leads), 0)}</Mono>
                 <Mono>{money(p.cur.spend)}</Mono>
+                <Mono>{money(p.cur.payment)}</Mono>
                 <Mono>{money(p.cur.cpl, 2)}</Mono>
                 <Mono>{nf(p.cur.booked)}</Mono>
                 <Mono>{nf(p.cur.show)}</Mono>
@@ -923,20 +979,22 @@ function MoverCard({ title, rows, sign, color }) {
 /* ================================================================== *
  *  COUNSELLORS
  * ================================================================== */
-function TeamView({ week, prev, order, weeks, onStaff, wk }) {
+function TeamView({ week, order, weeks }) {
   const rows = COUNSELLORS.map((p) => {
     const r = week.counsellors?.[p.id] || {};
-    const q = prev?.counsellors?.[p.id] || {};
-    const l = num(r.leads), b = num(r.booked), s = num(r.show);
-    return { ...p, leads: l, booked: b, show: s, bookRate: div(b, l), showRate: div(s, b), prevShow: div(num(q.show), num(q.booked)) };
+    const b = num(r.booked), sh = num(r.show), co = num(r.coes);
+    return { ...p, booked: b, show: sh, coes: co, showRate: div(sh, b) };
   });
-  const tot = rows.reduce((a, r) => ({ leads: a.leads + r.leads, booked: a.booked + r.booked, show: a.show + r.show }), { leads: 0, booked: 0, show: 0 });
+  const tot = rows.reduce((a, r) => ({ booked: a.booked + r.booked, show: a.show + r.show, coes: a.coes + r.coes }), { booked: 0, show: 0, coes: 0 });
   const teamShowRate = div(tot.show, tot.booked);
+  const anyShow = tot.show > 0;
 
   const teams = ["Visa", "Career", "Education"].map((t) => {
     const g = rows.filter((r) => r.team === t);
-    const b = g.reduce((a, r) => a + r.booked, 0), s = g.reduce((a, r) => a + r.show, 0);
-    return { team: t, booked: b, show: s, showRate: div(s, b), people: g.length };
+    const b = g.reduce((a, r) => a + r.booked, 0);
+    const sh = g.reduce((a, r) => a + r.show, 0);
+    const co = g.reduce((a, r) => a + r.coes, 0);
+    return { team: t, booked: b, show: sh, coes: co, showRate: div(sh, b), people: g.length };
   }).filter((t) => t.people > 0);
 
   const trend = order.map((k) => {
@@ -945,59 +1003,57 @@ function TeamView({ week, prev, order, weeks, onStaff, wk }) {
     return row;
   });
   const anyTrend = trend.some((r) => COUNSELLORS.some((p) => r[p.name] > 0));
-
-  const chart = rows.filter((r) => r.booked > 0).map((r) => ({ name: r.name, Bookings: r.booked, Show: r.show, team: r.team }));
+  const chart = rows.filter((r) => r.booked > 0 || r.coes > 0)
+    .map((r) => ({ name: r.name, Bookings: r.booked, COEs: r.coes, team: r.team }));
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <SectionHead n="A" title="This week by counsellor" note={`team show rate ${pctf(teamShowRate, 0)}`} />
+      <SectionHead n="A" title="This week by counsellor" note={anyShow ? `team show rate ${pctf(teamShowRate, 0)}` : "attendance not recorded this week"} />
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 660 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
           <thead>
             <tr style={{ background: C.wash }}>
-              {["Counsellor", "Team", "Leads", "Bookings", "Show", "Booking rate", "Show rate", "vs team"].map((h, i) => (
-                <th key={h} style={{ ...th, textAlign: i < 2 ? "left" : "right", paddingLeft: i === 0 ? 16 : 8 }}>{h}</th>
+              {["Counsellor", "Team", "Bookings", "Show", "COEs", "Show rate", "vs team"].map((h, i2) => (
+                <th key={h} style={{ ...th, textAlign: i2 < 2 ? "left" : "right", paddingLeft: i2 === 0 ? 16 : 8 }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
-              const gap = r.booked > 0 ? r.showRate - teamShowRate : null;
+              const gap = r.booked > 0 && r.show > 0 ? r.showRate - teamShowRate : null;
               return (
                 <tr key={r.id} className="rowHover">
                   <td style={{ ...td, textAlign: "left", paddingLeft: 16, fontSize: 13, fontWeight: 500 }}>{r.name}</td>
                   <td style={{ ...td, textAlign: "left" }}>
                     <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono',monospace", letterSpacing: ".08em", textTransform: "uppercase", color: TEAM_COLOR[r.team] }}>{r.team}</span>
                   </td>
-                  <Mono dim>{r.leads ? nf(r.leads) : "—"}</Mono>
                   <Mono>{nf(r.booked)}</Mono>
-                  <Mono>{nf(r.show)}</Mono>
-                  <Mono dim>{pctf(r.bookRate, 0)}</Mono>
-                  <Mono>{pctf(r.showRate, 0)}</Mono>
+                  <Mono dim>{r.show ? nf(r.show) : "\u2014"}</Mono>
+                  <Mono>{r.coes ? nf(r.coes) : "\u2014"}</Mono>
+                  <Mono>{r.show ? pctf(r.showRate, 0) : "\u2014"}</Mono>
                   <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: gap == null ? C.faint : gap >= 0 ? C.up : C.down }}>
-                    {gap == null ? "—" : `${gap >= 0 ? "+" : ""}${(gap * 100).toFixed(0)}pp`}
+                    {gap == null ? "\u2014" : `${gap >= 0 ? "+" : ""}${(gap * 100).toFixed(0)}pp`}
                   </td>
                 </tr>
               );
             })}
             <tr style={{ background: C.wash, borderTop: `2px solid ${C.ink}` }}>
               <td style={{ ...td, textAlign: "left", paddingLeft: 16, fontWeight: 600 }} colSpan={2}>All counsellors</td>
-              <Mono>{nf(tot.leads)}</Mono>
               <Mono>{nf(tot.booked)}</Mono>
-              <Mono>{nf(tot.show)}</Mono>
-              <Mono dim>{pctf(div(tot.booked, tot.leads), 0)}</Mono>
-              <Mono>{pctf(teamShowRate, 0)}</Mono>
+              <Mono>{tot.show ? nf(tot.show) : "\u2014"}</Mono>
+              <Mono>{nf(tot.coes)}</Mono>
+              <Mono>{anyShow ? pctf(teamShowRate, 0) : "\u2014"}</Mono>
               <td style={{ ...td }} />
             </tr>
           </tbody>
         </table>
       </Card>
       <p style={{ fontSize: 11.5, color: C.faint, margin: 0, lineHeight: 1.6 }}>
-        "vs team" is percentage points above or below the all-counsellor show rate this week. On a single week
-        it is mostly noise — one no-show swings a small book badly. Read it across four weeks before acting on it.
+        "vs team" is percentage points above or below the all-counsellor show rate this week. On one week it is
+        mostly noise \u2014 a single no-show swings a small book badly. Read it across four weeks before acting on it.
       </p>
 
-      <SectionHead n="B" title="By practice area" note="visa · career · education" />
+      <SectionHead n="B" title="By practice area" note="visa \u00b7 career \u00b7 education" />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
         {teams.map((t) => (
           <Card key={t.team} style={{ borderTop: `3px solid ${TEAM_COLOR[t.team]}` }}>
@@ -1007,7 +1063,7 @@ function TeamView({ week, prev, order, weeks, onStaff, wk }) {
               <span style={{ fontSize: 11.5, color: C.muted }}>bookings</span>
             </div>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
-              {nf(t.show)} showed · <span style={{ color: t.showRate >= teamShowRate ? C.up : C.down, fontFamily: "'IBM Plex Mono',monospace" }}>{pctf(t.showRate, 0)}</span>
+              {nf(t.coes)} COEs{t.show ? <> \u00b7 <span style={{ color: t.showRate >= teamShowRate ? C.up : C.down, fontFamily: "'IBM Plex Mono',monospace" }}>{pctf(t.showRate, 0)}</span> show</> : null}
             </div>
           </Card>
         ))}
@@ -1015,7 +1071,7 @@ function TeamView({ week, prev, order, weeks, onStaff, wk }) {
 
       {chart.length > 0 && (
         <>
-          <SectionHead n="C" title="Booked against showed" note="this week" />
+          <SectionHead n="C" title="Bookings and COEs" note="this week" />
           <Card>
             <ResponsiveContainer width="100%" height={230}>
               <BarChart data={chart} margin={{ top: 6, right: 12, left: -8, bottom: 0 }}>
@@ -1025,7 +1081,7 @@ function TeamView({ week, prev, order, weeks, onStaff, wk }) {
                 <Tooltip contentStyle={tipStyle} />
                 <Legend wrapperStyle={legendStyle} />
                 <Bar dataKey="Bookings" fill={C.plum} fillOpacity={0.28} radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Show" fill={C.plum} radius={[2, 2, 0, 0]} />
+                <Bar dataKey="COEs" fill={C.plum} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -1043,8 +1099,8 @@ function TeamView({ week, prev, order, weeks, onStaff, wk }) {
                 <YAxis tick={axTick} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tipStyle} />
                 <Legend wrapperStyle={legendStyle} />
-                {COUNSELLORS.map((p, i) => (
-                  <Line key={p.id} type="monotone" dataKey={p.name} stroke={TEAM_COLOR[p.team]} strokeOpacity={0.45 + (i % 3) * 0.27} strokeWidth={1.6} dot={{ r: 1.8 }} />
+                {COUNSELLORS.map((p, i2) => (
+                  <Line key={p.id} type="monotone" dataKey={p.name} stroke={TEAM_COLOR[p.team]} strokeOpacity={0.45 + (i2 % 3) * 0.27} strokeWidth={1.6} dot={{ r: 1.8 }} />
                 ))}
               </LineChart>
             </ResponsiveContainer>
@@ -1066,7 +1122,7 @@ function TrendsView({ order, weeks }) {
   const rows = order.map((k) => {
     const t = rates(rollup(weeks[k], CHANNELS));
     const r = {
-      week: weekLabel(k), Leads: t.leads, Spend: Math.round(t.spend), CPL: Math.round(t.cpl),
+      week: weekLabel(k), Leads: t.leads, Spend: Math.round(t.spend), Payment: Math.round(t.payment), CPL: Math.round(t.cpl),
       Booked: t.booked, Show: t.show, "Paid Bookings": t.paid, COEs: t.coes,
       "Booking rate": +(t.bookRate * 100).toFixed(1), "Show rate": +(t.showRate * 100).toFixed(1),
     };
@@ -1074,12 +1130,12 @@ function TrendsView({ order, weeks }) {
     OWNERS.forEach((o) => (r[o.short] = rollup(weeks[k], CHANNELS.filter((c) => c.owner === o.id)).leads));
     return r;
   });
-  if (!rows.some((r) => r.Leads > 0 || r.Spend > 0))
+  if (!rows.some((r) => r.Leads > 0 || r.Spend > 0 || r.Booked > 0))
     return <Empty title="No weeks logged yet" body="Enter one week of numbers and every chart builds itself." />;
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <SectionHead n="A" title="Leads and spend" note="every week logged" />
+      <SectionHead n="A" title="Leads, spend and payment" note="every week logged" />
       <Card>
         <ResponsiveContainer width="100%" height={230}>
           <LineChart data={rows} margin={{ top: 6, right: 12, left: -8, bottom: 0 }}>
@@ -1091,6 +1147,7 @@ function TrendsView({ order, weeks }) {
             <Legend wrapperStyle={legendStyle} />
             <Line yAxisId="l" type="monotone" dataKey="Leads" stroke={C.ink} strokeWidth={2} dot={{ r: 2.5 }} />
             <Line yAxisId="r" type="monotone" dataKey="Spend" stroke={C.navy} strokeWidth={1.6} dot={{ r: 2 }} strokeDasharray="4 3" />
+            <Line yAxisId="r" type="monotone" dataKey="Payment" stroke={C.pine} strokeWidth={1.6} dot={{ r: 2 }} strokeDasharray="1 3" />
           </LineChart>
         </ResponsiveContainer>
       </Card>
@@ -1104,7 +1161,7 @@ function TrendsView({ order, weeks }) {
             <YAxis tick={axTick} axisLine={false} tickLine={false} />
             <Tooltip contentStyle={tipStyle} />
             <Legend wrapperStyle={legendStyle} />
-            {[["Leads", C.ink], ["Booked", C.navy], ["Show", C.pine], ["Paid Bookings", "#4C7C5E"], ["COEs", C.ochre]].map(([k, col]) => (
+            {[["Leads", C.ink], ["Booked", C.navy], ["Show", C.pine], ["COEs", C.ochre]].map(([k, col]) => (
               <Line key={k} type="monotone" dataKey={k} stroke={col} strokeWidth={1.7} dot={{ r: 2 }} />
             ))}
           </LineChart>
@@ -1358,10 +1415,10 @@ function exportCSV(order, weeks) {
       ...fieldIds.map((f) => (g.inputs.includes(f) ? num(row[f]) : ""))].join(","));
   }));
   lines.push("", "COUNSELLORS");
-  lines.push(["Week ending", "Week", "Counsellor", "Team", "Leads assigned", "Bookings", "Show"].join(","));
+  lines.push(["Week ending", "Week", "Counsellor", "Team", "Bookings", "Show", "COEs"].join(","));
   order.forEach((k) => COUNSELLORS.forEach((p) => {
     const r = weeks[k]?.counsellors?.[p.id] || {};
-    lines.push([k, weekLabel(k), p.name, p.team, num(r.leads), num(r.booked), num(r.show)].join(","));
+    lines.push([k, weekLabel(k), p.name, p.team, num(r.booked), num(r.show), num(r.coes)].join(","));
   }));
   const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" }));
   const a = document.createElement("a");
